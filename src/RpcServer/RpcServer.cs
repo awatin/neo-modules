@@ -1,3 +1,4 @@
+using Akka.Actor;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.DependencyInjection;
 using Neo.IO;
 using Neo.IO.Json;
+using Neo.Network.P2P;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -19,18 +21,20 @@ using System.Threading.Tasks;
 
 namespace Neo.Plugins
 {
-    public sealed partial class RpcServer : IDisposable
+    public partial class RpcServer : IDisposable
     {
         private readonly Dictionary<string, Func<JArray, JObject>> methods = new Dictionary<string, Func<JArray, JObject>>();
 
         private IWebHost host;
-        private readonly RpcServerSettings settings;
+        private RpcServerSettings settings;
         private readonly NeoSystem system;
+        private readonly LocalNode localNode;
 
         public RpcServer(NeoSystem system, RpcServerSettings settings)
         {
             this.system = system;
             this.settings = settings;
+            localNode = system.LocalNode.Ask<LocalNode>(new LocalNode.GetInstance()).Result;
             RegisterMethods(this);
         }
 
@@ -90,11 +94,11 @@ namespace Neo.Plugins
         {
             host = new WebHostBuilder().UseKestrel(options => options.Listen(settings.BindAddress, settings.Port, listenOptions =>
             {
-                // Default value is unlimited
+                // Default value is 40
                 options.Limits.MaxConcurrentConnections = settings.MaxConcurrentConnections;
-                // Default value is 2 minutes
+                // Default value is 1 minutes
                 options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(1);
-                // Default value is 30 seconds
+                // Default value is 15 seconds
                 options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(15);
 
                 if (string.IsNullOrEmpty(settings.SslCert)) return;
@@ -107,7 +111,7 @@ namespace Neo.Plugins
                     {
                         if (err != SslPolicyErrors.None)
                             return false;
-                        X509Certificate2 authority = chain.ChainElements[chain.ChainElements.Count - 1].Certificate;
+                        X509Certificate2 authority = chain.ChainElements[^1].Certificate;
                         return settings.TrustedAuthorities.Contains(authority.Thumbprint);
                     };
                 });
@@ -134,6 +138,11 @@ namespace Neo.Plugins
             .Build();
 
             host.Start();
+        }
+
+        internal void UpdateSettings(RpcServerSettings settings)
+        {
+            this.settings = settings;
         }
 
         private async Task ProcessAsync(HttpContext context)
@@ -170,7 +179,7 @@ namespace Neo.Plugins
                 using StreamReader reader = new StreamReader(context.Request.Body);
                 try
                 {
-                    request = JObject.Parse(reader.ReadToEnd());
+                    request = JObject.Parse(await reader.ReadToEndAsync());
                 }
                 catch (FormatException) { }
             }

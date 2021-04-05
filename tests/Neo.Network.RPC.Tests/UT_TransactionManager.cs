@@ -1,6 +1,7 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using Neo.Cryptography;
+using Neo.Cryptography.ECC;
 using Neo.IO;
 using Neo.IO.Json;
 using Neo.Network.P2P;
@@ -10,10 +11,10 @@ using Neo.SmartContract;
 using Neo.SmartContract.Native;
 using Neo.VM;
 using Neo.Wallets;
-using Neo.Wallets.NEP6;
 using System;
 using System.Linq;
 using System.Numerics;
+using System.Threading.Tasks;
 
 namespace Neo.Network.RPC.Tests
 {
@@ -27,6 +28,7 @@ namespace Neo.Network.RPC.Tests
         KeyPair keyPair2;
         UInt160 sender;
         UInt160 multiHash;
+        RpcClient client;
 
         [TestInitialize]
         public void TestSetup()
@@ -34,17 +36,25 @@ namespace Neo.Network.RPC.Tests
             keyPair1 = new KeyPair(Wallet.GetPrivateKeyFromWIF("KyXwTh1hB76RRMquSvnxZrJzQx7h9nQP2PCRL38v6VDb5ip3nf1p"));
             keyPair2 = new KeyPair(Wallet.GetPrivateKeyFromWIF("L2LGkrwiNmUAnWYb1XGd5mv7v2eDf6P4F3gHyXSrNJJR4ArmBp7Q"));
             sender = Contract.CreateSignatureRedeemScript(keyPair1.PublicKey).ToScriptHash();
-            multiHash = Contract.CreateMultiSigContract(2, keyPair1.PublicKey, keyPair2.PublicKey).ScriptHash;
+            multiHash = Contract.CreateMultiSigContract(2, new ECPoint[] { keyPair1.PublicKey, keyPair2.PublicKey }).ScriptHash;
             rpcClientMock = MockRpcClient(sender, new byte[1]);
+            client = rpcClientMock.Object;
             multiSigMock = MockMultiSig(multiHash, new byte[1]);
         }
 
         public static Mock<RpcClient> MockRpcClient(UInt160 sender, byte[] script)
         {
-            var mockRpc = new Mock<RpcClient>(MockBehavior.Strict, "http://seed1.neo.org:10331", null, null);
+            var mockRpc = new Mock<RpcClient>(MockBehavior.Strict, new Uri("http://seed1.neo.org:10331"), null, null, null);
 
             // MockHeight
-            mockRpc.Setup(p => p.RpcSend("getblockcount")).Returns(100).Verifiable();
+            mockRpc.Setup(p => p.RpcSendAsync("getblockcount")).ReturnsAsync(100).Verifiable();
+
+            // calculatenetworkfee
+            var networkfee = new JObject();
+            networkfee["networkfee"] = 100000000;
+            mockRpc.Setup(p => p.RpcSendAsync("calculatenetworkfee", It.Is<JObject[]>(u => true)))
+                .ReturnsAsync(networkfee)
+                .Verifiable();
 
             // MockGasBalance
             byte[] balanceScript = NativeContract.GAS.Hash.MakeScript("balanceOf", sender);
@@ -67,10 +77,17 @@ namespace Neo.Network.RPC.Tests
 
         public static Mock<RpcClient> MockMultiSig(UInt160 multiHash, byte[] script)
         {
-            var mockRpc = new Mock<RpcClient>(MockBehavior.Strict, "http://seed1.neo.org:10331", null, null);
+            var mockRpc = new Mock<RpcClient>(MockBehavior.Strict, new Uri("http://seed1.neo.org:10331"), null, null, null);
 
             // MockHeight
-            mockRpc.Setup(p => p.RpcSend("getblockcount")).Returns(100).Verifiable();
+            mockRpc.Setup(p => p.RpcSendAsync("getblockcount")).ReturnsAsync(100).Verifiable();
+
+            // calculatenetworkfee
+            var networkfee = new JObject();
+            networkfee["networkfee"] = 100000000;
+            mockRpc.Setup(p => p.RpcSendAsync("calculatenetworkfee", It.Is<JObject[]>(u => true)))
+                .ReturnsAsync(networkfee)
+                .Verifiable();
 
             // MockGasBalance
             byte[] balanceScript = NativeContract.GAS.Hash.MakeScript("balanceOf", multiHash);
@@ -96,21 +113,20 @@ namespace Neo.Network.RPC.Tests
             var result = new RpcInvokeResult()
             {
                 Stack = parameters.Select(p => p.ToStackItem()).ToArray(),
-                GasConsumed = "100",
-                Script = script.ToHexString(),
+                GasConsumed = 100,
+                Script = Convert.ToBase64String(script),
                 State = VMState.HALT
             };
 
-            mockClient.Setup(p => p.RpcSend("invokescript", It.Is<JObject[]>(j => j[0].AsString() == script.ToHexString())))
-                .Returns(result.ToJson())
+            mockClient.Setup(p => p.RpcSendAsync("invokescript", It.Is<JObject[]>(j =>
+                Convert.FromBase64String(j[0].AsString()).SequenceEqual(script))))
+                .ReturnsAsync(result.ToJson())
                 .Verifiable();
         }
 
         [TestMethod]
-        public void TestMakeTransaction()
+        public async Task TestMakeTransaction()
         {
-            txManager = new TransactionManager(rpcClientMock.Object);
-
             Signer[] signers = new Signer[1]
             {
                 new Signer
@@ -121,17 +137,15 @@ namespace Neo.Network.RPC.Tests
             };
 
             byte[] script = new byte[1];
-            txManager.MakeTransaction(script, signers);
+            txManager = await TransactionManager.MakeTransactionAsync(rpcClientMock.Object, script, signers);
 
             var tx = txManager.Tx;
             Assert.AreEqual(WitnessScope.Global, tx.Signers[0].Scopes);
         }
 
         [TestMethod]
-        public void TestSign()
+        public async Task TestSign()
         {
-            txManager = new TransactionManager(rpcClientMock.Object);
-
             Signer[] signers = new Signer[1]
             {
                 new Signer
@@ -142,33 +156,55 @@ namespace Neo.Network.RPC.Tests
             };
 
             byte[] script = new byte[1];
-            txManager.MakeTransaction(script, signers)
+            txManager = await TransactionManager.MakeTransactionAsync(client, script, signers);
+            await txManager
                 .AddSignature(keyPair1)
-                .Sign();
+                .SignAsync();
 
             // get signature from Witnesses
             var tx = txManager.Tx;
             byte[] signature = tx.Witnesses[0].InvocationScript.Skip(2).ToArray();
 
-            Assert.IsTrue(Crypto.VerifySignature(tx.GetHashData(), signature, keyPair1.PublicKey));
+            Assert.IsTrue(Crypto.VerifySignature(tx.GetSignData(client.protocolSettings.Network), signature, keyPair1.PublicKey));
             // verify network fee and system fee
-            long networkFee = tx.Size * (long)1000 + ApplicationEngine.OpCodePrices[OpCode.PUSHDATA1] + ApplicationEngine.OpCodePrices[OpCode.PUSHDATA1] + ApplicationEngine.OpCodePrices[OpCode.PUSHNULL] + ApplicationEngine.ECDsaVerifyPrice * 1;
-            Assert.AreEqual(networkFee, tx.NetworkFee);
+            Assert.AreEqual(100000000/*Mock*/, tx.NetworkFee);
             Assert.AreEqual(100, tx.SystemFee);
 
             // duplicate sign should not add new witness
-            txManager.AddSignature(keyPair1).Sign();
-            Assert.AreEqual(1, txManager.Tx.Witnesses.Length);
+            await ThrowsAsync<Exception>(async () => await txManager.AddSignature(keyPair1).SignAsync());
+            Assert.AreEqual(null, txManager.Tx.Witnesses);
 
             // throw exception when the KeyPair is wrong
-            Assert.ThrowsException<Exception>(() => txManager.AddSignature(keyPair2).Sign());
+            await ThrowsAsync<Exception>(async () => await txManager.AddSignature(keyPair2).SignAsync());
+        }
+
+        // https://docs.microsoft.com/en-us/archive/msdn-magazine/2014/november/async-programming-unit-testing-asynchronous-code#testing-exceptions
+        static async Task<TException> ThrowsAsync<TException>(Func<Task> action, bool allowDerivedTypes = true)
+            where TException : Exception
+        {
+            try
+            {
+                await action();
+            }
+            catch (Exception ex)
+            {
+                if (allowDerivedTypes && !(ex is TException))
+                    throw new Exception("Delegate threw exception of type " +
+                    ex.GetType().Name + ", but " + typeof(TException).Name +
+                    " or a derived type was expected.", ex);
+                if (!allowDerivedTypes && ex.GetType() != typeof(TException))
+                    throw new Exception("Delegate threw exception of type " +
+                    ex.GetType().Name + ", but " + typeof(TException).Name +
+                    " was expected.", ex);
+                return (TException)ex;
+            }
+            throw new Exception("Delegate did not throw expected exception " +
+            typeof(TException).Name + ".");
         }
 
         [TestMethod]
-        public void TestSignMulti()
+        public async Task TestSignMulti()
         {
-            txManager = new TransactionManager(multiSigMock.Object);
-
             // Cosigner needs multi signature
             Signer[] signers = new Signer[1]
             {
@@ -180,17 +216,16 @@ namespace Neo.Network.RPC.Tests
             };
 
             byte[] script = new byte[1];
-            txManager.MakeTransaction(script, signers)
+            txManager = await TransactionManager.MakeTransactionAsync(multiSigMock.Object, script, signers);
+            await txManager
                 .AddMultiSig(keyPair1, 2, keyPair1.PublicKey, keyPair2.PublicKey)
                 .AddMultiSig(keyPair2, 2, keyPair1.PublicKey, keyPair2.PublicKey)
-                .Sign();
+                .SignAsync();
         }
 
         [TestMethod]
-        public void TestAddWitness()
+        public async Task TestAddWitness()
         {
-            txManager = new TransactionManager(rpcClientMock.Object);
-
             // Cosigner as contract scripthash
             Signer[] signers = new Signer[2]
             {
@@ -207,14 +242,14 @@ namespace Neo.Network.RPC.Tests
             };
 
             byte[] script = new byte[1];
-            txManager.MakeTransaction(script, signers);
+            txManager = await TransactionManager.MakeTransactionAsync(rpcClientMock.Object, script, signers);
             txManager.AddWitness(UInt160.Zero);
             txManager.AddSignature(keyPair1);
-            txManager.Sign();
+            await txManager.SignAsync();
 
             var tx = txManager.Tx;
             Assert.AreEqual(2, tx.Witnesses.Length);
-            Assert.AreEqual(41, tx.Witnesses[0].VerificationScript.Length);
+            Assert.AreEqual(40, tx.Witnesses[0].VerificationScript.Length);
             Assert.AreEqual(66, tx.Witnesses[0].InvocationScript.Length);
         }
     }

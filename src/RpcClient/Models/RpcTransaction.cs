@@ -16,9 +16,9 @@ namespace Neo.Network.RPC.Models
 
         public VMState? VMState { get; set; }
 
-        public JObject ToJson()
+        public JObject ToJson(ProtocolSettings protocolSettings)
         {
-            JObject json = Transaction.ToJson();
+            JObject json = Utility.TransactionToJson(Transaction, protocolSettings);
             if (Confirmations != null)
             {
                 json["blockhash"] = BlockHash.ToString();
@@ -32,10 +32,12 @@ namespace Neo.Network.RPC.Models
             return json;
         }
 
-        public static RpcTransaction FromJson(JObject json)
+        public static RpcTransaction FromJson(JObject json, ProtocolSettings protocolSettings)
         {
-            RpcTransaction transaction = new RpcTransaction();
-            transaction.Transaction = Utility.TransactionFromJson(json);
+            RpcTransaction transaction = new RpcTransaction
+            {
+                Transaction = Utility.TransactionFromJson(json, protocolSettings)
+            };
             if (json["confirmations"] != null)
             {
                 transaction.BlockHash = UInt256.Parse(json["blockhash"].AsString());

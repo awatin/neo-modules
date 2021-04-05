@@ -5,6 +5,7 @@ using Neo.SmartContract.Native;
 using Neo.VM;
 using Neo.Wallets;
 using System.Numerics;
+using System.Threading.Tasks;
 
 namespace Neo.Network.RPC.Tests
 {
@@ -26,43 +27,42 @@ namespace Neo.Network.RPC.Tests
         }
 
         [TestMethod]
-        public void TestGetMaxTransactionsPerBlock()
+        public async Task TestGetExecFeeFactor()
         {
-            byte[] testScript = NativeContract.Policy.Hash.MakeScript("getMaxTransactionsPerBlock");
-            UT_TransactionManager.MockInvokeScript(rpcClientMock, testScript, new ContractParameter { Type = ContractParameterType.Integer, Value = new BigInteger(512) });
+            byte[] testScript = NativeContract.Policy.Hash.MakeScript("getExecFeeFactor");
+            UT_TransactionManager.MockInvokeScript(rpcClientMock, testScript, new ContractParameter { Type = ContractParameterType.Integer, Value = new BigInteger(30) });
 
-            var result = policyAPI.GetMaxTransactionsPerBlock();
-            Assert.AreEqual(512u, result);
+            var result = await policyAPI.GetExecFeeFactorAsync();
+            Assert.AreEqual(30u, result);
         }
 
         [TestMethod]
-        public void TestGetMaxBlockSize()
+        public async Task TestGetStoragePrice()
         {
-            byte[] testScript = NativeContract.Policy.Hash.MakeScript("getMaxBlockSize");
-            UT_TransactionManager.MockInvokeScript(rpcClientMock, testScript, new ContractParameter { Type = ContractParameterType.Integer, Value = new BigInteger(1024u * 256u) });
+            byte[] testScript = NativeContract.Policy.Hash.MakeScript("getStoragePrice");
+            UT_TransactionManager.MockInvokeScript(rpcClientMock, testScript, new ContractParameter { Type = ContractParameterType.Integer, Value = new BigInteger(100000) });
 
-            var result = policyAPI.GetMaxBlockSize();
-            Assert.AreEqual(1024u * 256u, result);
+            var result = await policyAPI.GetStoragePriceAsync();
+            Assert.AreEqual(100000u, result);
         }
 
         [TestMethod]
-        public void TestGetFeePerByte()
+        public async Task TestGetFeePerByte()
         {
             byte[] testScript = NativeContract.Policy.Hash.MakeScript("getFeePerByte");
             UT_TransactionManager.MockInvokeScript(rpcClientMock, testScript, new ContractParameter { Type = ContractParameterType.Integer, Value = new BigInteger(1000) });
 
-            var result = policyAPI.GetFeePerByte();
+            var result = await policyAPI.GetFeePerByteAsync();
             Assert.AreEqual(1000L, result);
         }
 
         [TestMethod]
-        public void TestGetBlockedAccounts()
+        public async Task TestIsBlocked()
         {
-            byte[] testScript = NativeContract.Policy.Hash.MakeScript("getBlockedAccounts");
-            UT_TransactionManager.MockInvokeScript(rpcClientMock, testScript, new ContractParameter { Type = ContractParameterType.Array, Value = new[] { new ContractParameter { Type = ContractParameterType.Hash160, Value = UInt160.Zero } } });
-
-            var result = policyAPI.GetBlockedAccounts();
-            Assert.AreEqual(UInt160.Zero, result[0]);
+            byte[] testScript = NativeContract.Policy.Hash.MakeScript("isBlocked", UInt160.Zero);
+            UT_TransactionManager.MockInvokeScript(rpcClientMock, testScript, new ContractParameter { Type = ContractParameterType.Boolean, Value = true });
+            var result = await policyAPI.IsBlockedAsync(UInt160.Zero);
+            Assert.AreEqual(true, result);
         }
     }
 }

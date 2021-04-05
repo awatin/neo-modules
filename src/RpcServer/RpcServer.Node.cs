@@ -7,6 +7,7 @@ using Neo.IO.Json;
 using Neo.Ledger;
 using Neo.Network.P2P;
 using Neo.Network.P2P.Payloads;
+using System;
 using System.Linq;
 using static Neo.Ledger.Blockchain;
 
@@ -15,16 +16,16 @@ namespace Neo.Plugins
     partial class RpcServer
     {
         [RpcMethod]
-        private JObject GetConnectionCount(JArray _params)
+        protected virtual JObject GetConnectionCount(JArray _params)
         {
-            return LocalNode.Singleton.ConnectedCount;
+            return localNode.ConnectedCount;
         }
 
         [RpcMethod]
-        private JObject GetPeers(JArray _params)
+        protected virtual JObject GetPeers(JArray _params)
         {
             JObject json = new JObject();
-            json["unconnected"] = new JArray(LocalNode.Singleton.GetUnconnectedPeers().Select(p =>
+            json["unconnected"] = new JArray(localNode.GetUnconnectedPeers().Select(p =>
             {
                 JObject peerJson = new JObject();
                 peerJson["address"] = p.Address.ToString();
@@ -32,7 +33,7 @@ namespace Neo.Plugins
                 return peerJson;
             }));
             json["bad"] = new JArray(); //badpeers has been removed
-            json["connected"] = new JArray(LocalNode.Singleton.GetRemoteNodes().Select(p =>
+            json["connected"] = new JArray(localNode.GetRemoteNodes().Select(p =>
             {
                 JObject peerJson = new JObject();
                 peerJson["address"] = p.Remote.Address.ToString();
@@ -57,28 +58,29 @@ namespace Neo.Plugins
         }
 
         [RpcMethod]
-        private JObject GetVersion(JArray _params)
+        protected virtual JObject GetVersion(JArray _params)
         {
             JObject json = new JObject();
-            json["tcpport"] = LocalNode.Singleton.ListenerTcpPort;
-            json["wsport"] = LocalNode.Singleton.ListenerWsPort;
+            json["tcpport"] = localNode.ListenerTcpPort;
+            json["wsport"] = localNode.ListenerWsPort;
             json["nonce"] = LocalNode.Nonce;
             json["useragent"] = LocalNode.UserAgent;
+            json["network"] = system.Settings.Network;
             return json;
         }
 
         [RpcMethod]
-        private JObject SendRawTransaction(JArray _params)
+        protected virtual JObject SendRawTransaction(JArray _params)
         {
-            Transaction tx = _params[0].AsString().HexToBytes().AsSerializable<Transaction>();
+            Transaction tx = Convert.FromBase64String(_params[0].AsString()).AsSerializable<Transaction>();
             RelayResult reason = system.Blockchain.Ask<RelayResult>(tx).Result;
             return GetRelayResult(reason.Result, tx.Hash);
         }
 
         [RpcMethod]
-        private JObject SubmitBlock(JArray _params)
+        protected virtual JObject SubmitBlock(JArray _params)
         {
-            Block block = _params[0].AsString().HexToBytes().AsSerializable<Block>();
+            Block block = Convert.FromBase64String(_params[0].AsString()).AsSerializable<Block>();
             RelayResult reason = system.Blockchain.Ask<RelayResult>(block).Result;
             return GetRelayResult(reason.Result, block.Hash);
         }

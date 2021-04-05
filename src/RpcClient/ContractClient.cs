@@ -2,8 +2,10 @@ using Neo.Network.P2P.Payloads;
 using Neo.Network.RPC.Models;
 using Neo.SmartContract;
 using Neo.SmartContract.Manifest;
+using Neo.SmartContract.Native;
 using Neo.VM;
 using Neo.Wallets;
+using System.Threading.Tasks;
 
 namespace Neo.Network.RPC
 {
@@ -30,10 +32,10 @@ namespace Neo.Network.RPC
         /// <param name="operation">contract operation</param>
         /// <param name="args">operation arguments</param>
         /// <returns></returns>
-        public RpcInvokeResult TestInvoke(UInt160 scriptHash, string operation, params object[] args)
+        public Task<RpcInvokeResult> TestInvokeAsync(UInt160 scriptHash, string operation, params object[] args)
         {
             byte[] script = scriptHash.MakeScript(operation, args);
-            return rpcClient.InvokeScript(script);
+            return rpcClient.InvokeScriptAsync(script);
         }
 
         /// <summary>
@@ -43,24 +45,22 @@ namespace Neo.Network.RPC
         /// <param name="manifest">contract manifest</param>
         /// <param name="key">sender KeyPair</param>
         /// <returns></returns>
-        public Transaction CreateDeployContractTx(byte[] contractScript, ContractManifest manifest, KeyPair key)
+        public async Task<Transaction> CreateDeployContractTxAsync(byte[] nefFile, ContractManifest manifest, KeyPair key)
         {
             byte[] script;
             using (ScriptBuilder sb = new ScriptBuilder())
             {
-                sb.EmitSysCall(ApplicationEngine.System_Contract_Create, contractScript, manifest.ToString());
+                sb.EmitDynamicCall(NativeContract.ContractManagement.Hash, "deploy", nefFile, manifest.ToJson().ToString());
                 script = sb.ToArray();
             }
             UInt160 sender = Contract.CreateSignatureRedeemScript(key.PublicKey).ToScriptHash();
             Signer[] signers = new[] { new Signer { Scopes = WitnessScope.CalledByEntry, Account = sender } };
 
-            Transaction tx = new TransactionManager(rpcClient)
-                .MakeTransaction(script, signers)
+            TransactionManagerFactory factory = new TransactionManagerFactory(rpcClient);
+            TransactionManager manager = await factory.MakeTransactionAsync(script, signers).ConfigureAwait(false);
+            return await manager
                 .AddSignature(key)
-                .Sign()
-                .Tx;
-
-            return tx;
+                .SignAsync().ConfigureAwait(false);
         }
     }
 }

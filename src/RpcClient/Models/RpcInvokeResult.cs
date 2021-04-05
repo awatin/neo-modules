@@ -12,18 +12,22 @@ namespace Neo.Network.RPC.Models
 
         public VM.VMState State { get; set; }
 
-        public string GasConsumed { get; set; }
+        public long GasConsumed { get; set; }
 
         public StackItem[] Stack { get; set; }
 
         public string Tx { get; set; }
+
+        public string Exception { get; set; }
 
         public JObject ToJson()
         {
             JObject json = new JObject();
             json["script"] = Script;
             json["state"] = State;
-            json["gasconsumed"] = GasConsumed;
+            json["gasconsumed"] = GasConsumed.ToString();
+            if (!string.IsNullOrEmpty(Exception))
+                json["exception"] = Exception;
             try
             {
                 json["stack"] = new JArray(Stack.Select(p => p.ToJson()));
@@ -39,10 +43,14 @@ namespace Neo.Network.RPC.Models
 
         public static RpcInvokeResult FromJson(JObject json)
         {
-            RpcInvokeResult invokeScriptResult = new RpcInvokeResult();
-            invokeScriptResult.Script = json["script"].AsString();
-            invokeScriptResult.State = json["state"].TryGetEnum<VM.VMState>();
-            invokeScriptResult.GasConsumed = json["gasconsumed"].AsString();
+            RpcInvokeResult invokeScriptResult = new RpcInvokeResult
+            {
+                Script = json["script"].AsString(),
+                State = json["state"].TryGetEnum<VMState>(),
+                GasConsumed = long.Parse(json["gasconsumed"].AsString()),
+            };
+            if (json.ContainsProperty("exception"))
+                invokeScriptResult.Exception = json["exception"]?.AsString();
             try
             {
                 invokeScriptResult.Stack = ((JArray)json["stack"]).Select(p => Utility.StackItemFromJson(p)).ToArray();
@@ -69,10 +77,11 @@ namespace Neo.Network.RPC.Models
 
         public static RpcStack FromJson(JObject json)
         {
-            RpcStack stackJson = new RpcStack();
-            stackJson.Type = json["type"].AsString();
-            stackJson.Value = json["value"].AsString();
-            return stackJson;
+            return new RpcStack
+            {
+                Type = json["type"].AsString(),
+                Value = json["value"].AsString()
+            };
         }
     }
 }

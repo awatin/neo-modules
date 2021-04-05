@@ -10,9 +10,9 @@ namespace Neo.Plugins
     partial class RpcServer
     {
         [RpcMethod]
-        private JObject ListPlugins(JArray _params)
+        protected virtual JObject ListPlugins(JArray _params)
         {
-            return new JArray(Neo.Plugins.Plugin.Plugins
+            return new JArray(Plugin.Plugins
                 .OrderBy(u => u.Name)
                 .Select(u => new JObject
                 {
@@ -26,14 +26,14 @@ namespace Neo.Plugins
         }
 
         [RpcMethod]
-        private JObject ValidateAddress(JArray _params)
+        protected virtual JObject ValidateAddress(JArray _params)
         {
             string address = _params[0].AsString();
             JObject json = new JObject();
             UInt160 scriptHash;
             try
             {
-                scriptHash = address.ToScriptHash();
+                scriptHash = address.ToScriptHash(system.Settings.AddressVersion);
             }
             catch
             {

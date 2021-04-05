@@ -11,21 +11,22 @@ namespace Neo.Network.RPC.Models
 
         public UInt256 NextBlockHash { get; set; }
 
-        public JObject ToJson()
+        public JObject ToJson(ProtocolSettings protocolSettings)
         {
-            JObject json = Header.ToJson();
+            JObject json = Header.ToJson(protocolSettings);
             json["confirmations"] = Confirmations;
             json["nextblockhash"] = NextBlockHash?.ToString();
             return json;
         }
 
-        public static RpcBlockHeader FromJson(JObject json)
+        public static RpcBlockHeader FromJson(JObject json, ProtocolSettings protocolSettings)
         {
-            RpcBlockHeader block = new RpcBlockHeader();
-            block.Header = Utility.HeaderFromJson(json);
-            block.Confirmations = (uint)json["confirmations"].AsNumber();
-            block.NextBlockHash = json["nextblockhash"] is null ? null : UInt256.Parse(json["nextblockhash"].AsString());
-            return block;
+            return new RpcBlockHeader
+            {
+                Header = Utility.HeaderFromJson(json, protocolSettings),
+                Confirmations = (uint)json["confirmations"].AsNumber(),
+                NextBlockHash = json["nextblockhash"] is null ? null : UInt256.Parse(json["nextblockhash"].AsString())
+            };
         }
     }
 }
